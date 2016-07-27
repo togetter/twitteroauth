@@ -335,19 +335,13 @@ class TwitterOAuth extends Config
     }
 
     /**
-     * Make an HTTP request
+     * @param  string $url
+     * @param  string $authorization
      *
-     * @param string $url
-     * @param string $method
-     * @param string $authorization
-     * @param array $postfields
-     *
-     * @return string
-     * @throws TwitterOAuthException
+     * @return array
      */
-    private function request($url, $method, $authorization, array $postfields)
+    private function createCurlOptions($url, $authorization)
     {
-        /* Curl settings */
         $options = [
             // CURLOPT_VERBOSE => true,
             CURLOPT_CAINFO => __DIR__ . DIRECTORY_SEPARATOR . 'cacert.pem',
@@ -362,7 +356,7 @@ class TwitterOAuth extends Config
             CURLOPT_USERAGENT => $this->userAgent,
         ];
 
-        if($this->gzipEncoding) {
+        if ($this->gzipEncoding) {
             $options[CURLOPT_ENCODING] = 'gzip';
         }
 
@@ -373,6 +367,25 @@ class TwitterOAuth extends Config
             $options[CURLOPT_PROXYAUTH] = CURLAUTH_BASIC;
             $options[CURLOPT_PROXYTYPE] = CURLPROXY_HTTP;
         }
+
+        return $options;
+    }
+
+    /**
+     * Make an HTTP request
+     *
+     * @param string $url
+     * @param string $method
+     * @param string $authorization
+     * @param array $postfields
+     *
+     * @return string
+     * @throws TwitterOAuthException
+     */
+    private function request($url, $method, $authorization, array $postfields)
+    {
+        /* Curl settings */
+        $options = $this->createCurlOptions($url, $authorization);
 
         switch ($method) {
             case 'GET':
@@ -412,6 +425,77 @@ class TwitterOAuth extends Config
         curl_close($curlHandle);
 
         return $responseBody;
+    }
+
+    /**
+     * Make multi request
+     * @param  array  $requestParamas
+     * @param  string $authorization
+     *
+     * @return array
+     * @throws TwitterOAuthException
+     */
+    private function multiRequest(array $requestParamas, $authorization)
+    {
+        $curlHandles = [];
+        $curlMultiHandle = curl_multi_init();
+
+        foreach ($requestParamas as $index => $requestParam) {
+            $options = $this->createCurlOptions($requestParam['url'], $authorization);
+
+            switch ($requestParam['method']) {
+                case 'GET':
+                    break;
+                case 'POST':
+                    $options[CURLOPT_POST] = true;
+                    $options[CURLOPT_POSTFIELDS] = Util::buildHttpQuery($requestParam['postfields']);
+                    break;
+                case 'DELETE':
+                    $options[CURLOPT_CUSTOMREQUEST] = 'DELETE';
+                    break;
+                case 'PUT':
+                    $options[CURLOPT_CUSTOMREQUEST] = 'PUT';
+                    break;
+            }
+
+            if (in_array($requestParam['method'], ['GET', 'PUT', 'DELETE']) && !empty($postfields)) {
+                $options[CURLOPT_URL] .= '?' . Util::buildHttpQuery($postfields);
+            }
+
+            $curlHandles[$index] = curl_init();
+            curl_setopt_array($curlHandles[$index], $options);
+            curl_multi_add_handle($curlMultiHandle, $curlHandles[$index]);
+        }
+
+        $runnning = null;
+
+        do {
+            curl_multi_exec($curlMultiHandle, $active);
+            curl_multi_select($curlMultiHandle);
+        } while ($runnning > 0);
+
+        $responses = [];
+        foreach (array_keys($requestParamas) as $index) {
+            // Throw exceptions on cURL errors.
+            if (curl_errno($curlHandles[$index]) > 0) {
+                throw new TwitterOAuthException(curl_error($curlHandles[$index]), curl_errno($curlHandles[$index]));
+            }
+
+            $this->response->setHttpCode(curl_getinfo($curlHandles[$index], CURLINFO_HTTP_CODE));
+
+            $responses[$index] = curl_multi_getcontent($curlHandles[$index]);
+
+            $parts = explode("\r\n\r\n", $responses[$index]);
+            $responseBody = array_pop($parts);
+            $responseHeader = array_pop($parts);
+            $this->response->setHeaders($this->parseHeaders($responseHeader));
+
+            curl_multi_remove_handle($curlMultiHandle, $curlHandles[$index]);
+            curl_close($curlHandles[$index]);
+        }
+        curl_multi_close($curlMultiHandle);
+
+        return $responses;
     }
 
     /**
