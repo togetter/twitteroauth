@@ -13,7 +13,9 @@ class TwitterOAuthTest extends \PHPUnit_Framework_TestCase
 
     protected function setUp()
     {
-        $this->twitter = new TwitterOAuth(CONSUMER_KEY, CONSUMER_SECRET, ACCESS_TOKEN, ACCESS_TOKEN_SECRET);
+        $dotenv = new \Dotenv\Dotenv(__DIR__.'/../');
+        $dotenv->overload();
+        $this->twitter = new TwitterOAuth($_ENV['CONSUMER_KEY'], $_ENV['CONSUMER_SECRET'], $_ENV['ACCESS_TOKEN'], $_ENV['ACCESS_TOKEN_SECRET']);
     }
 
     public function testBuildClient()
@@ -24,7 +26,7 @@ class TwitterOAuthTest extends \PHPUnit_Framework_TestCase
 
     public function testSetOauthToken()
     {
-        $twitter = new TwitterOAuth(CONSUMER_KEY, CONSUMER_SECRET);
+        $twitter = new TwitterOAuth(CONSUMER_KEY, $_ENV['CONSUMER_SECRET']);
         $twitter->setOauthToken(ACCESS_TOKEN, ACCESS_TOKEN_SECRET);
         $this->assertObjectHasAttribute('consumer', $twitter);
         $this->assertObjectHasAttribute('token', $twitter);
@@ -34,7 +36,7 @@ class TwitterOAuthTest extends \PHPUnit_Framework_TestCase
 
     public function testOauth2Token()
     {
-        $twitter = new TwitterOAuth(CONSUMER_KEY, CONSUMER_SECRET);
+        $twitter = new TwitterOAuth($_ENV['CONSUMER_KEY'], $_ENV['CONSUMER_SECRET']);
         $result = $twitter->oauth2('oauth2/token', array('grant_type' => 'client_credentials'));
         $this->assertEquals(200, $twitter->getLastHttpCode());
         $this->assertObjectHasAttribute('token_type', $result);
@@ -48,7 +50,7 @@ class TwitterOAuthTest extends \PHPUnit_Framework_TestCase
      */
     public function testBearerToken($accessToken)
     {
-        $twitter = new TwitterOAuth(CONSUMER_KEY, CONSUMER_SECRET, null, $accessToken->access_token);
+        $twitter = new TwitterOAuth($_ENV['CONSUMER_KEY'], $_ENV['CONSUMER_SECRET'], null, $accessToken->access_token);
         $result = $twitter->get('statuses/user_timeline', array('screen_name' => 'twitterapi'));
         if ($twitter->getLastHttpCode() !== 200) {
             $this->assertEquals('foo', substr($accessToken->access_token, 0, 75));
@@ -64,7 +66,7 @@ class TwitterOAuthTest extends \PHPUnit_Framework_TestCase
     //  */
     // public function testOauth2TokenInvalidate($accessToken)
     // {
-    //     $twitter = new TwitterOAuth(CONSUMER_KEY, CONSUMER_SECRET);
+    //     $twitter = new TwitterOAuth($_ENV['CONSUMER_KEY'], $_ENV['CONSUMER_SECRET']);
     //     // HACK: access_token is already urlencoded but gets urlencoded again breaking the invalidate request.
     //     $result = $twitter->oauth2(
     //         'oauth2/invalidate_token',
@@ -77,7 +79,7 @@ class TwitterOAuthTest extends \PHPUnit_Framework_TestCase
 
     public function testOauthRequestToken()
     {
-        $twitter = new TwitterOAuth(CONSUMER_KEY, CONSUMER_SECRET);
+        $twitter = new TwitterOAuth($_ENV['CONSUMER_KEY'], $_ENV['CONSUMER_SECRET']);
         $result = $twitter->oauth('oauth/request_token', array('oauth_callback' => OAUTH_CALLBACK));
         $this->assertEquals(200, $twitter->getLastHttpCode());
         $this->assertArrayHasKey('oauth_token', $result);
@@ -107,8 +109,8 @@ class TwitterOAuthTest extends \PHPUnit_Framework_TestCase
     {
         // Can't test this without a browser logging into Twitter so check for the correct error instead.
         $twitter = new TwitterOAuth(
-            CONSUMER_KEY,
-            CONSUMER_SECRET,
+            $_ENV['CONSUMER_KEY'],
+            $_ENV['CONSUMER_SECRET'],
             $requestToken['oauth_token'],
             $requestToken['oauth_token_secret']
         );
@@ -148,11 +150,30 @@ class TwitterOAuthTest extends \PHPUnit_Framework_TestCase
         $this->assertEquals(200, $this->twitter->getLastHttpCode());
     }
 
-    public function testGetSearchTweets()
+    public function testGetSearchTweetsa()
     {
         $result = $this->twitter->get('search/tweets', array('q' => 'twitter'));
         $this->assertEquals(200, $this->twitter->getLastHttpCode());
         return $result->statuses;
+    }
+
+    public function testTwoApiCalls()
+    {
+        $results = $this->twitter->apiRequests([
+            [
+                'path' => 'statuses/mentions_timeline',
+                'method' => 'GET',
+            ],
+            [
+                'path' => 'search/tweets',
+                'method' => 'GET',
+                'parameters' => [
+                    'q' => 'twitter',
+                ],
+            ],
+        ]);
+        $this->assertNotNull($results[0]);
+        $this->assertNotNull($results[1]);
     }
 
     /**
