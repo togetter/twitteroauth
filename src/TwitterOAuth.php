@@ -167,6 +167,24 @@ class TwitterOAuth extends Config
     }
 
     /**
+     * Make requests to the API.
+     * @param array $requestParams
+     *
+     * @return array
+     */
+    public function apiRequests(array $requestParams) : array
+    {
+        return $this->multiHttp(array_map($requestParams, function ($param) {
+            return [
+                'host' => self::API_HOST,
+                'path' => $param['path'],
+                'method' => $param['method'],
+                'parameters' => $param['parameters'],
+            ];
+        }));
+    }
+
+    /**
      * Make GET requests to the API.
      *
      * @param string $path
@@ -309,6 +327,33 @@ class TwitterOAuth extends Config
     }
 
     /**
+     * @param array $httpArgso
+     *
+     * @return array
+     */
+    private function multiHttp(array $httpArgs = []) : array
+    {
+        $responses = [];
+        $oAuthRequestParams = [];
+
+        foreach ($httpArgs as $httpArg) {
+            array_push($oAuthRequestParams, [
+                'url' => sprintf('%s/%s/%s.json', $httpArg['host'], self::API_VERSION, $httpArg['path']),
+                'method' => $httpArg['method'],
+                'parameters' => $httpArg['parameters'],
+            ]);
+        }
+
+        $results = $this->multiOAuthRequest($oAuthRequestParams);
+
+        foreach ($results as $result) {
+            array_push($responses, JsonDecoder::decode($result, $this->decodeJsonAsArray));
+        }
+
+        return $responses;
+    }
+
+    /**
      * Format and sign an OAuth / API request
      *
      * @param string $url
@@ -332,6 +377,38 @@ class TwitterOAuth extends Config
             $authorization = 'Authorization: Bearer ' . $this->bearer;
         }
         return $this->request($request->getNormalizedHttpUrl(), $method, $authorization, $parameters);
+    }
+
+    private function multiOAuthRequest(array $oAuthRequestParams) : array
+    {
+        $requestParams = [];
+        foreach ($oAuthRequestParams as $key => $params) {
+            $request = Request::fromConsumerAndToken(
+                $this->consumer,
+                $this->token,
+                $param['method'],
+                $param['url'],
+                $param['parameters']
+            );
+            if (array_key_exists('oauth_callback', $params['parameters'])) {
+                unset($params['parameters']['oauth_callback']);
+            }
+            if ($this->bearer === null) {
+                $request->signRequest($this->signatureMethod, $this->consumer, $this->token);
+                $authorization = $request->toHeader();
+            } else {
+                $authorization = 'Authorization: Bearer ' . $this->bearer;
+            }
+
+            array_push($requestParams, [
+                'url' => $request->getNormalizedHttpUrl(),
+                'method' => $params['method'],
+                'authorization' => $authorization,
+                'postfields' => $params['parameters'],
+            ]);
+        }
+
+        return $this->multiRequest($requestParams);
     }
 
     /**
@@ -435,13 +512,13 @@ class TwitterOAuth extends Config
      * @return array
      * @throws TwitterOAuthException
      */
-    private function multiRequest(array $requestParamas, $authorization)
+    private function multiRequest(array $requestParamas) : array
     {
         $curlHandles = [];
         $curlMultiHandle = curl_multi_init();
 
         foreach ($requestParamas as $index => $requestParam) {
-            $options = $this->createCurlOptions($requestParam['url'], $authorization);
+            $options = $this->createCurlOptions($requestParam['url'], $requestParam['authorization']);
 
             switch ($requestParam['method']) {
                 case 'GET':
@@ -481,14 +558,14 @@ class TwitterOAuth extends Config
                 throw new TwitterOAuthException(curl_error($curlHandles[$index]), curl_errno($curlHandles[$index]));
             }
 
-            $this->response->setHttpCode(curl_getinfo($curlHandles[$index], CURLINFO_HTTP_CODE));
+            // $this->response->setHttpCode(curl_getinfo($curlHandles[$index], CURLINFO_HTTP_CODE));
 
             $responses[$index] = curl_multi_getcontent($curlHandles[$index]);
 
             $parts = explode("\r\n\r\n", $responses[$index]);
             $responseBody = array_pop($parts);
             $responseHeader = array_pop($parts);
-            $this->response->setHeaders($this->parseHeaders($responseHeader));
+            // $this->response->setHeaders($this->parseHeaders($responseHeader));
 
             curl_multi_remove_handle($curlMultiHandle, $curlHandles[$index]);
             curl_close($curlHandles[$index]);
