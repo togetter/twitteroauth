@@ -174,14 +174,16 @@ class TwitterOAuth extends Config
      */
     public function apiRequests(array $requestParams): array
     {
-        return $this->multiHttp(array_map(function ($param) {
-            return [
+        $httpParams = [];
+        foreach ($requestParams as $key => $param) {
+            $httpParams[$key] = [
                 'host' => self::API_HOST,
                 'path' => $param['path'],
                 'method' => $param['method'],
                 'parameters' => (isset($param['parameters']) ? $param['parameters'] : []),
             ];
-        }, $requestParams));
+        }
+        return $this->multiHttp($httpParams);
     }
 
     /**
@@ -336,18 +338,18 @@ class TwitterOAuth extends Config
         $responses = [];
         $oAuthRequestParams = [];
 
-        foreach ($httpArgs as $httpArg) {
-            array_push($oAuthRequestParams, [
+        foreach ($httpArgs as $key => $httpArg) {
+            $oAuthRequestParams[$key] = [
                 'url' => sprintf('%s/%s/%s.json', $httpArg['host'], self::API_VERSION, $httpArg['path']),
                 'method' => $httpArg['method'],
                 'parameters' => $httpArg['parameters'],
-            ]);
+            ];
         }
 
         $results = $this->multiOAuthRequest($oAuthRequestParams);
 
-        foreach ($results as $result) {
-            array_push($responses, JsonDecoder::decode($result, $this->decodeJsonAsArray));
+        foreach ($results as $key => $result) {
+            $responses[$key] = JsonDecoder::decode($result, $this->decodeJsonAsArray);
         }
 
         return $responses;
@@ -400,12 +402,12 @@ class TwitterOAuth extends Config
                 $authorization = 'Authorization: Bearer ' . $this->bearer;
             }
 
-            array_push($requestParams, [
+            $requestParams[$key] = [
                 'url' => $request->getNormalizedHttpUrl(),
                 'method' => $param['method'],
                 'authorization' => $authorization,
                 'postfields' => $param['parameters'],
-            ]);
+            ];
         }
 
         return $this->multiRequest($requestParams);
@@ -518,7 +520,7 @@ class TwitterOAuth extends Config
         $curlMultiHandle = curl_multi_init();
         $responseBodies = [];
 
-        foreach ($requestParamas as $index => $requestParam) {
+        foreach ($requestParamas as $key=> $requestParam) {
             $options = $this->createCurlOptions($requestParam['url'], $requestParam['authorization']);
 
             switch ($requestParam['method']) {
@@ -540,9 +542,9 @@ class TwitterOAuth extends Config
                 $options[CURLOPT_URL] .= '?' . Util::buildHttpQuery($requestParam['postfields']);
             }
 
-            $curlHandles[$index] = curl_init();
-            curl_setopt_array($curlHandles[$index], $options);
-            curl_multi_add_handle($curlMultiHandle, $curlHandles[$index]);
+            $curlHandles[$key] = curl_init();
+            curl_setopt_array($curlHandles[$key], $options);
+            curl_multi_add_handle($curlMultiHandle, $curlHandles[$key]);
         }
 
         $runnning = null;
@@ -553,23 +555,20 @@ class TwitterOAuth extends Config
         } while ($runnning > 0);
 
         $responses = [];
-        foreach (array_keys($requestParamas) as $index) {
+        foreach (array_keys($requestParamas) as $key) {
             // Throw exceptions on cURL errors.
-            if (curl_errno($curlHandles[$index]) > 0) {
-                throw new TwitterOAuthException(curl_error($curlHandles[$index]), curl_errno($curlHandles[$index]));
+            if (curl_errno($curlHandles[$key]) > 0) {
+                throw new TwitterOAuthException(curl_error($curlHandles[$key]), curl_errno($curlHandles[$key]));
             }
 
-            // $this->response->setHttpCode(curl_getinfo($curlHandles[$index], CURLINFO_HTTP_CODE));
+            $responses[$key] = curl_multi_getcontent($curlHandles[$key]);
 
-            $responses[$index] = curl_multi_getcontent($curlHandles[$index]);
-
-            $parts = explode("\r\n\r\n", $responses[$index]);
-            $responseBodies[$index] = array_pop($parts);
+            $parts = explode("\r\n\r\n", $responses[$key]);
+            $responseBodies[$key] = array_pop($parts);
             $responseHeader = array_pop($parts);
-            // $this->response->setHeaders($this->parseHeaders($responseHeader));
 
-            curl_multi_remove_handle($curlMultiHandle, $curlHandles[$index]);
-            curl_close($curlHandles[$index]);
+            curl_multi_remove_handle($curlMultiHandle, $curlHandles[$key]);
+            curl_close($curlHandles[$key]);
         }
         curl_multi_close($curlMultiHandle);
 
