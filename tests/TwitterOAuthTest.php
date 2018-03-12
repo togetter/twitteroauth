@@ -26,8 +26,8 @@ class TwitterOAuthTest extends \PHPUnit_Framework_TestCase
 
     public function testSetOauthToken()
     {
-        $twitter = new TwitterOAuth(CONSUMER_KEY, $_ENV['CONSUMER_SECRET']);
-        $twitter->setOauthToken(ACCESS_TOKEN, ACCESS_TOKEN_SECRET);
+        $twitter = new TwitterOAuth($_ENV['CONSUMER_KEY'], $_ENV['CONSUMER_SECRET']);
+        $twitter->setOauthToken($_ENV['ACCESS_TOKEN'], $_ENV['ACCESS_TOKEN_SECRET']);
         $this->assertObjectHasAttribute('consumer', $twitter);
         $this->assertObjectHasAttribute('token', $twitter);
         $twitter->get('friendships/show', ['target_screen_name' => 'twitterapi']);
@@ -36,7 +36,7 @@ class TwitterOAuthTest extends \PHPUnit_Framework_TestCase
 
     public function testOauth2Token()
     {
-        $twitter = new TwitterOAuth(CONSUMER_KEY, CONSUMER_SECRET);
+        $twitter = new TwitterOAuth($_ENV['CONSUMER_KEY'], $_ENV['CONSUMER_SECRET']);
         $result = $twitter->oauth2('oauth2/token', ['grant_type' => 'client_credentials']);
         $this->assertEquals(200, $twitter->getLastHttpCode());
         $this->assertObjectHasAttribute('token_type', $result);
@@ -50,7 +50,7 @@ class TwitterOAuthTest extends \PHPUnit_Framework_TestCase
      */
     public function testBearerToken($accessToken)
     {
-        $twitter = new TwitterOAuth(CONSUMER_KEY, CONSUMER_SECRET, null, $accessToken->access_token);
+        $twitter = new TwitterOAuth($_ENV['CONSUMER_KEY'], $_ENV['CONSUMER_SECRET'], null, $accessToken->access_token);
         $result = $twitter->get('statuses/user_timeline', ['screen_name' => 'twitterapi']);
         if ($twitter->getLastHttpCode() !== 200) {
             $this->assertEquals('foo', substr($accessToken->access_token, 0, 75));
@@ -79,7 +79,7 @@ class TwitterOAuthTest extends \PHPUnit_Framework_TestCase
 
     public function testOauthRequestToken()
     {
-        $twitter = new TwitterOAuth(CONSUMER_KEY, CONSUMER_SECRET);
+        $twitter = new TwitterOAuth($_ENV['CONSUMER_KEY'], $_ENV['CONSUMER_SECRET']);
         $result = $twitter->oauth('oauth/request_token', ['oauth_callback' => OAUTH_CALLBACK]);
         $this->assertEquals(200, $twitter->getLastHttpCode());
         $this->assertArrayHasKey('oauth_token', $result);
@@ -150,7 +150,7 @@ class TwitterOAuthTest extends \PHPUnit_Framework_TestCase
         $this->assertEquals(200, $this->twitter->getLastHttpCode());
     }
 
-    public function testGetSearchTweetsa()
+    public function testGetSearchTweets()
     {
         $result = $this->twitter->get('search/tweets', ['q' => 'twitter']);
         $this->assertEquals(200, $this->twitter->getLastHttpCode());

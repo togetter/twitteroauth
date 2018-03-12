@@ -375,6 +375,29 @@ class TwitterOAuth extends Config
     }
 
     /**
+     * @param array $httpArgso
+     *
+     * @return array
+     */
+    private function multiHttp(array $httpArgs = []) : array
+    {
+        $responses = [];
+        $oAuthRequestParams = [];
+        foreach ($httpArgs as $key => $httpArg) {
+            $oAuthRequestParams[$key] = [
+                'url' => sprintf('%s/%s/%s.json', $httpArg['host'], self::API_VERSION, $httpArg['path']),
+                'method' => $httpArg['method'],
+                'parameters' => $httpArg['parameters'],
+            ];
+        }
+        $results = $this->multiOAuthRequest($oAuthRequestParams);
+        foreach ($results as $key => $result) {
+            $responses[$key] = JsonDecoder::decode($result, $this->decodeJsonAsArray);
+        }
+        return $responses;
+    }
+
+    /**
      *
      * Make requests and retry them (if enabled) in case of Twitter's problems.
      *
@@ -493,7 +516,7 @@ class TwitterOAuth extends Config
         if ($this->useCAFile()) {
             $options[CURLOPT_CAINFO] = __DIR__ . DIRECTORY_SEPARATOR . 'cacert.pem';
         }
-      
+
         if ($this->gzipEncoding) {
             $options[CURLOPT_ENCODING] = 'gzip';
         }
@@ -581,7 +604,9 @@ class TwitterOAuth extends Config
         $responseBodies = [];
 
         foreach ($requestParamas as $key=> $requestParam) {
-            $options = $this->createCurlOptions($requestParam['url'], $requestParam['authorization']);
+            $options = $this->curlOptions();
+            $options[CURLOPT_URL] = $requestParam['url'];
+            $options[CURLOPT_HTTPHEADER] = ['Accept: application/json', $requestParam['authorization'], 'Expect:'];
 
             switch ($requestParam['method']) {
                 case 'GET':
