@@ -197,6 +197,26 @@ class TwitterOAuth extends Config
     }
 
     /**
+     * Make requests to the API.
+     * @param array $requestParams
+     *
+     * @return array
+     */
+    public function apiRequests(array $requestParams): array
+    {
+        $httpParams = [];
+        foreach ($requestParams as $key => $param) {
+            $httpParams[$key] = [
+                'host' => self::API_HOST,
+                'path' => $param['path'],
+                'method' => $param['method'],
+                'parameters' => (isset($param['parameters']) ? $param['parameters'] : []),
+            ];
+        }
+        return $this->multiHttp($httpParams);
+    }
+
+    /**
      * Make GET requests to the API.
      *
      * @param string $path
@@ -357,6 +377,29 @@ class TwitterOAuth extends Config
     }
 
     /**
+     * @param array $httpArgso
+     *
+     * @return array
+     */
+    private function multiHttp(array $httpArgs = []) : array
+    {
+        $responses = [];
+        $oAuthRequestParams = [];
+        foreach ($httpArgs as $key => $httpArg) {
+            $oAuthRequestParams[$key] = [
+                'url' => sprintf('%s/%s/%s.json', $httpArg['host'], self::API_VERSION, $httpArg['path']),
+                'method' => $httpArg['method'],
+                'parameters' => $httpArg['parameters'],
+            ];
+        }
+        $results = $this->multiOAuthRequest($oAuthRequestParams);
+        foreach ($results as $key => $result) {
+            $responses[$key] = JsonDecoder::decode($result, $this->decodeJsonAsArray);
+        }
+        return $responses;
+    }
+
+    /**
      *
      * Make requests and retry them (if enabled) in case of Twitter's problems.
      *
@@ -422,6 +465,38 @@ class TwitterOAuth extends Config
             $authorization = 'Authorization: Bearer ' . $this->bearer;
         }
         return $this->request($request->getNormalizedHttpUrl(), $method, $authorization, $parameters, $json);
+    }
+
+    private function multiOAuthRequest(array $oAuthRequestParams) : array
+    {
+        $requestParams = [];
+        foreach ($oAuthRequestParams as $key => $param) {
+            $request = Request::fromConsumerAndToken(
+                $this->consumer,
+                $this->token,
+                $param['method'],
+                $param['url'],
+                $param['parameters']
+            );
+            if (array_key_exists('oauth_callback', $param['parameters'])) {
+                unset($param['parameters']['oauth_callback']);
+            }
+            if ($this->bearer === null) {
+                $request->signRequest($this->signatureMethod, $this->consumer, $this->token);
+                $authorization = $request->toHeader();
+            } else {
+                $authorization = 'Authorization: Bearer ' . $this->bearer;
+            }
+
+            $requestParams[$key] = [
+                'url' => $request->getNormalizedHttpUrl(),
+                'method' => $param['method'],
+                'authorization' => $authorization,
+                'postfields' => $param['parameters'],
+            ];
+        }
+
+        return $this->multiRequest($requestParams);
     }
 
     /**
@@ -524,6 +599,77 @@ class TwitterOAuth extends Config
         curl_close($curlHandle);
 
         return $responseBody;
+    }
+
+    /**
+     * Make multi request
+     * @param  array  $requestParamas
+     * @param  string $authorization
+     *
+     * @return array
+     * @throws TwitterOAuthException
+     */
+    private function multiRequest(array $requestParamas) : array
+    {
+        $curlHandles = [];
+        $curlMultiHandle = curl_multi_init();
+        $responseBodies = [];
+
+        foreach ($requestParamas as $key=> $requestParam) {
+            $options = $this->curlOptions();
+            $options[CURLOPT_URL] = $requestParam['url'];
+            $options[CURLOPT_HTTPHEADER] = ['Accept: application/json', $requestParam['authorization'], 'Expect:'];
+
+            switch ($requestParam['method']) {
+                case 'GET':
+                    break;
+                case 'POST':
+                    $options[CURLOPT_POST] = true;
+                    $options[CURLOPT_POSTFIELDS] = Util::buildHttpQuery($requestParam['postfields']);
+                    break;
+                case 'DELETE':
+                    $options[CURLOPT_CUSTOMREQUEST] = 'DELETE';
+                    break;
+                case 'PUT':
+                    $options[CURLOPT_CUSTOMREQUEST] = 'PUT';
+                    break;
+            }
+
+            if (in_array($requestParam['method'], ['GET', 'PUT', 'DELETE']) && !empty($requestParam['postfields'])) {
+                $options[CURLOPT_URL] .= '?' . Util::buildHttpQuery($requestParam['postfields']);
+            }
+
+            $curlHandles[$key] = curl_init();
+            curl_setopt_array($curlHandles[$key], $options);
+            curl_multi_add_handle($curlMultiHandle, $curlHandles[$key]);
+        }
+
+        $runnning = null;
+
+        do {
+            curl_multi_exec($curlMultiHandle, $runnning);
+            curl_multi_select($curlMultiHandle);
+        } while ($runnning > 0);
+
+        $responses = [];
+        foreach (array_keys($requestParamas) as $key) {
+            // Throw exceptions on cURL errors.
+            if (curl_errno($curlHandles[$key]) > 0) {
+                throw new TwitterOAuthException(curl_error($curlHandles[$key]), curl_errno($curlHandles[$key]));
+            }
+
+            $responses[$key] = curl_multi_getcontent($curlHandles[$key]);
+
+            $parts = explode("\r\n\r\n", $responses[$key]);
+            $responseBodies[$key] = array_pop($parts);
+            $responseHeader = array_pop($parts);
+
+            curl_multi_remove_handle($curlMultiHandle, $curlHandles[$key]);
+            curl_close($curlHandles[$key]);
+        }
+        curl_multi_close($curlMultiHandle);
+
+        return $responseBodies;
     }
 
     /**
